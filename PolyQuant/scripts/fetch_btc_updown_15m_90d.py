@@ -8,7 +8,7 @@ everything into a comprehensive dataset with caching support.
 
 Usage:
     # Full 90-day scan
-    python3 scripts/fetch_btc_updown_15m_90d.py --days 90 --fidelity 1 --lookback-hours 6 --lookforward-hours 6
+    python3 scripts/fetch_btc_updown_15m_90d.py --days 90 --fidelity 1 --lookback-hours 1 --lookforward-hours 0.5
     
     # Quick test (2 days, max 20 markets)
     python3 scripts/fetch_btc_updown_15m_90d.py --days 2 --max-found 20
@@ -172,11 +172,10 @@ def save_cache(cache_dir: Path, cache: Dict[str, Any]):
 
 def fetch_all_btc_15m_markets(days: int) -> List[Dict[str, Any]]:
     """
-    Fetch all BTC 15-minute markets from Gamma API.
+    Fetch all BTC 15-minute markets using direct epoch generation.
     
-    BTC 15m markets are located at high offsets (~130k+) in the Gamma API
-    because markets are ordered chronologically (oldest first) and BTC 15m
-    markets are recent. We search backwards from a high offset.
+    Recent BTC 15m markets are NOT returned by the /markets endpoint,
+    so we must generate epochs and fetch each market directly by slug.
     
     Args:
         days: Number of days to look back
@@ -184,119 +183,54 @@ def fetch_all_btc_15m_markets(days: int) -> List[Dict[str, Any]]:
     Returns:
         List of market dictionaries
     """
-    logger.info("Fetching all BTC 15-minute markets from Gamma API...")
+    logger.info("Fetching BTC 15-minute markets via direct epoch generation...")
     
-    url = f"{GAMMA_API_BASE}/markets"
     all_markets = []
-    limit = 100
     
     # Calculate date range (UTC-aware)
     now = datetime.now(timezone.utc)
     start_dt = now - timedelta(days=days)
     
-    # Calculate epoch range for fallback filtering
-    start_epoch = int(start_dt.timestamp())
-    end_epoch = int(now.timestamp())
-    
     logger.info(f"Looking for markets between {start_dt.isoformat()} and {now.isoformat()}")
-    logger.info(f"Epoch range: {start_epoch} to {end_epoch}")
     
-    # Start from offset 150k where BTC 15m markets begin
-    # Search forward to find recent markets
-    offset = 150000
+    # Generate all 15-minute epochs in the range
+    # Round to nearest 15-minute boundary
+    start_epoch = int(start_dt.timestamp())
+    start_epoch = (start_epoch // 900) * 900  # Round down to 15-min boundary
     
-    while offset < 200000:  # Safety limit
-        params = {
-            "limit": limit,
-            "offset": offset
-        }
+    end_epoch = int(now.timestamp())
+    end_epoch = (end_epoch // 900) * 900  # Round down to 15-min boundary
+    
+    total_epochs = (end_epoch - start_epoch) // 900
+    logger.info(f"Generating {total_epochs} epochs from {start_epoch} to {end_epoch}")
+    
+    found_count = 0
+    not_found_count = 0
+    
+    # Generate epochs and fetch each market
+    for epoch in range(start_epoch, end_epoch + 900, 900):
+        slug = f"btc-updown-15m-{epoch}"
         
-        response = request_with_retry("GET", url, params=params)
+        # Fetch market by slug
+        url = f"{GAMMA_API_BASE}/markets/slug/{slug}"
+        response = request_with_retry("GET", url)
         
-        if response is None:
-            logger.warning("No response from API")
-            continue
-        
-        try:
-            data = response.json()
-            markets = data if isinstance(data, list) else data.get("data", [])
-            
-            if not markets:
-                # Reached the end, try going forward
-                break
-            
-            found_in_batch = 0
-            
-            # Filter for BTC 15-minute markets
-            for market in markets:
-                slug = market.get("slug", "")
+        if response is not None:
+            try:
+                market = response.json()
+                all_markets.append(market)
+                found_count += 1
                 
-                # Check if it's a BTC 15m market by slug pattern
-                if slug.startswith("btc-updown-15m-"):
-                    # Extract epoch from slug for fallback filtering
-                    try:
-                        slug_epoch = int(slug.split("-")[-1])
-                    except (ValueError, IndexError):
-                        slug_epoch = None
-                    
-                    # Try date-based filtering first
-                    end_date_str = market.get("endDate")
-                    include_market = False
-                    
-                    if end_date_str:
-                        try:
-                            # Parse ISO datetime
-                            market_end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                            
-                            # Ensure timezone-aware
-                            if market_end_dt.tzinfo is None:
-                                market_end_dt = market_end_dt.replace(tzinfo=timezone.utc)
-                            else:
-                                # Convert to UTC
-                                market_end_dt = market_end_dt.astimezone(timezone.utc)
-                            
-                            # Check if within date range
-                            if start_dt <= market_end_dt <= now:
-                                include_market = True
-                            elif market_end_dt > now:
-                                # Market is too new, continue searching
-                                pass
-                        except Exception as e:
-                            logger.warning(f"Failed to parse endDate for {slug}: {e}")
-                            # Fallback to epoch-based filtering
-                            if slug_epoch and start_epoch <= slug_epoch <= end_epoch:
-                                include_market = True
-                    elif slug_epoch:
-                        # No endDate, use epoch-based filtering
-                        if start_epoch <= slug_epoch <= end_epoch:
-                            include_market = True
-                    else:
-                        # No endDate and no valid epoch, include anyway
-                        include_market = True
-                    
-                    if include_market:
-                        all_markets.append(market)
-                        found_in_batch += 1
-            
-            if found_in_batch > 0:
-                logger.info(f"Offset {offset}: Found {found_in_batch} BTC 15m markets (total: {len(all_markets)})")
-            
-            # Safety limit
-            if len(all_markets) > 10000:
-                logger.warning(f"Reached safety limit of 10000 markets, stopping")
-                break
-            
-            # Check if we've reached the end
-            if len(markets) < limit:
-                break
-            
-            offset += limit
-        
-        except Exception as e:
-            logger.warning(f"Failed to parse markets response at offset {offset}: {e}")
-            continue
+                if found_count % 10 == 0:
+                    logger.info(f"Progress: {found_count} markets found, {not_found_count} not found (epoch {epoch})")
+            except Exception as e:
+                logger.warning(f"Failed to parse market {slug}: {e}")
+                not_found_count += 1
+        else:
+            not_found_count += 1
     
     logger.info(f"Total BTC 15-minute markets found: {len(all_markets)}")
+    logger.info(f"Markets not found (404): {not_found_count}")
     return all_markets
 
 
@@ -675,15 +609,15 @@ def main():
     parser.add_argument(
         "--lookback-hours",
         type=int,
-        default=6,
-        help="Hours to look back from epoch for price history (default: 6)"
+        default=1,
+        help="Hours to look back from epoch for price history (default: 1, focuses on active trading)"
     )
     
     parser.add_argument(
         "--lookforward-hours",
-        type=int,
-        default=6,
-        help="Hours to look forward from epoch for price history (default: 6)"
+        type=float,
+        default=0.5,
+        help="Hours to look forward from epoch for price history (default: 0.5, captures resolution period)"
     )
     
     parser.add_argument(
