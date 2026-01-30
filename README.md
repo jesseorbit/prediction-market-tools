@@ -1,19 +1,39 @@
 # jesse-quant-notes
 
-Personal quant research notes and scratchpad code.
+Personal quant research notes + scratchpad code for **prediction-market analytics** and **automated trading experiments**.
 
-This repository is experiment-first: small scripts, prototypes, and notes used to test trading ideas and prediction-market analytics. Expect rough edges and frequent iteration.
+This repo is **experiment-first**: small scripts, prototypes, and notes used to test trading ideas quickly.
+Expect rough edges, frequent iteration, and non-production code.
 
-## Contents
+---
 
-- **Arbitrage/**  
-  Experiments for cross-venue market matching and simple arbitrage scanning (e.g., Polymarket ↔ Kalshi).
+## What’s inside
 
-- **PolyQuant/**  
-  Prediction-market quant utilities, datasets, and research scripts.
+### `Arbitrage/` — Cross-venue arbitrage scanner
+Scans and surfaces arbitrage opportunities across prediction-market venues:
+- **Polymarket**
+- **Kalshi**
+- **Opinion** (Opinion Labs)
 
-- **config.py**  
-  Central configuration (endpoints, constants, local settings).
+Typical flow:
+1) Pull markets / prices / orderbooks  
+2) Normalize + match markets across venues  
+3) Compute spreads / edge candidates  
+4) Log / export opportunities
+
+---
+
+### `PolyQuant/` — Real-time BTC 15m trading experiments
+Real-time trading logic for **BTC 15-minute markets** (prediction markets).
+Focus: execution loops, position management, and unwinding logic under time constraints.
+
+Typical flow:
+1) Stream prices / market state  
+2) Trigger entries based on thresholds  
+3) Manage average price + hedges/unwind  
+4) Close/flatten near expiry and handle late-stage behavior
+
+---
 
 ## Quick start
 
@@ -21,47 +41,59 @@ This repository is experiment-first: small scripts, prototypes, and notes used t
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-2) Install dependencies
-If you have a requirements.txt:
+````
 
-bash
-Copy code
+### 2) Install dependencies
+
+```bash
 pip install -r requirements.txt
-Otherwise, install what the scripts require (commonly: requests, pandas, numpy).
+```
 
-3) Configure
-Prefer environment variables for any secrets. Do not commit API keys.
+If `requirements.txt` is missing, scripts commonly use: `requests`, `pandas`, `numpy`.
+
+### 3) Configure (never commit secrets)
+
+Use environment variables for API keys and private endpoints.
 
 Example:
 
-bash
-Copy code
+```bash
 export POLYMARKET_API_KEY="..."
+export KALSHI_API_KEY="..."
 export OPINION_API_KEY="..."
-How to run
-This repo contains multiple small experiments, so entry points vary by folder.
+```
 
-A typical workflow:
+---
 
-Pull markets / prices / orderbooks
+## How to run
 
-Normalize and match markets
+Because this repo contains multiple experiments, entry points vary by folder.
 
-Compute spreads / signals
+General pattern:
 
-Log or export results
-
-To discover options for a script:
-
-bash
-Copy code
+```bash
 python path/to/script.py --help
-Notes
-Research sandbox, not production trading code.
+```
 
-No financial advice.
+Suggested entry points:
 
-Never commit secrets.
+* `Arbitrage/` → run scanners and export candidate opportunities
+* `PolyQuant/` → run real-time BTC 15m trading loop
 
-License
-Private / All rights reserved (unless a LICENSE file is added later).
+> If you want, add a `README.md` inside each folder with the exact “run this script” command(s).
+
+---
+
+## Notes / Disclaimer
+
+* Research sandbox, **not production trading code**
+* No financial advice
+* Never commit secrets
+
+---
+
+## License
+
+Private / All rights reserved (unless a LICENSE file is added)
+
+```
