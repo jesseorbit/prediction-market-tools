@@ -1,4 +1,4 @@
-# jesse-quant-notes
+# prediction-market-tools
 
 Personal quant research notes + scratchpad code for **prediction-market analytics** and **automated trading experiments**.
 
